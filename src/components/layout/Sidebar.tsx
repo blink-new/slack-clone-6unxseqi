@@ -9,9 +9,11 @@ import { Badge } from '@/components/ui/badge'
 interface SidebarProps {
   currentChannel: string
   onChannelSelect: (channelId: string) => void
+  onlineUsers?: any[]
+  currentUser?: any
 }
 
-export function Sidebar({ currentChannel, onChannelSelect }: SidebarProps) {
+export function Sidebar({ currentChannel, onChannelSelect, onlineUsers = [], currentUser }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('')
 
   const channels = [
@@ -144,17 +146,47 @@ export function Sidebar({ currentChannel, onChannelSelect }: SidebarProps) {
         </div>
       </ScrollArea>
 
+      {/* Online Users */}
+      {onlineUsers.length > 0 && (
+        <div className="px-3 py-2">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center text-sm font-medium text-primary-foreground/80">
+              <Users className="h-3 w-3 mr-1" />
+              Online ({onlineUsers.length})
+            </div>
+          </div>
+          
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {onlineUsers.slice(0, 8).map((user) => (
+              <div key={user.id} className="flex items-center space-x-2 px-2 py-1 rounded text-sm">
+                <div className="relative">
+                  <Avatar className="h-4 w-4">
+                    <AvatarFallback className="text-xs">{user.name.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <div className="absolute -bottom-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full border border-primary" />
+                </div>
+                <span className="truncate text-primary-foreground/80">{user.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* User Profile */}
       <div className="p-3 border-t border-primary-foreground/20">
         <div className="flex items-center space-x-2">
           <div className="relative">
             <Avatar className="h-8 w-8">
-              <AvatarFallback>JD</AvatarFallback>
+              <AvatarFallback>
+                {currentUser?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'U'}
+              </AvatarFallback>
             </Avatar>
             <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-green-500 rounded-full border-2 border-primary" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">John Doe</p>
+            <p className="text-sm font-medium truncate">
+              {currentUser?.displayName || currentUser?.email?.split('@')[0] || 'User'}
+            </p>
             <p className="text-xs text-primary-foreground/60 truncate">Available</p>
           </div>
           <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-primary-foreground/60 hover:text-primary-foreground">

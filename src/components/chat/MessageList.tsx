@@ -21,6 +21,7 @@ interface Message {
 
 interface MessageListProps {
   messages: Message[]
+  onAddReaction?: (messageId: string, emoji: string) => void
 }
 
 export function MessageList({ messages }: MessageListProps) {

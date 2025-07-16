@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { blink } from './blink/client'
 import { Sidebar } from './components/layout/Sidebar'
 import { ChatHeader } from './components/layout/ChatHeader'
 import { MessageList } from './components/chat/MessageList'
 import { MessageInput } from './components/chat/MessageInput'
+import type { RealtimeChannel } from '@blinkdotnew/sdk'
 
 interface User {
   id: string
@@ -11,11 +12,95 @@ interface User {
   displayName?: string
 }
 
+interface Message {
+  id: string
+  content: string
+  author: {
+    id: string
+    name: string
+    avatar?: string
+  }
+  timestamp: Date
+  channelId: string
+  reactions?: { emoji: string; count: number; users: string[] }[]
+  replies?: number
+}
+
 function App() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentChannel, setCurrentChannel] = useState('general')
-  const [messages, setMessages] = useState<any[]>([])
+  const [messages, setMessages] = useState<Record<string, Message[]>>({})
+  const [onlineUsers, setOnlineUsers] = useState<any[]>([])
+  const channelRef = useRef<RealtimeChannel | null>(null)
+
+  // Welcome messages for empty channels
+  const getWelcomeMessages = (channelId: string): Message[] => {
+    const welcomeMessages: Record<string, Message[]> = {
+      general: [
+        {
+          id: 'welcome-general-1',
+          content: '👋 Welcome to the #general channel! This is where our team comes together for general discussions and updates.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'general'
+        },
+        {
+          id: 'welcome-general-2',
+          content: 'Feel free to introduce yourself, share updates, or start conversations here. Looking forward to collaborating with everyone! 🚀',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 30),
+          channelId: 'general'
+        }
+      ],
+      random: [
+        {
+          id: 'welcome-random-1',
+          content: '🎉 Welcome to #random! This is our space for casual conversations, fun discussions, and everything that doesn\'t fit elsewhere.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 45),
+          channelId: 'random'
+        }
+      ],
+      development: [
+        {
+          id: 'welcome-dev-1',
+          content: '💻 Welcome to #development! Share code snippets, discuss technical challenges, and collaborate on our projects here.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'development'
+        }
+      ],
+      design: [
+        {
+          id: 'welcome-design-1',
+          content: '🎨 Welcome to #design! Share your creative work, get feedback, and discuss design trends and ideas.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'design'
+        }
+      ],
+      announcements: [
+        {
+          id: 'welcome-announcements-1',
+          content: '📢 Welcome to #announcements! Important team updates and company news will be shared here.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'announcements'
+        }
+      ]
+    }
+
+    return welcomeMessages[channelId] || [
+      {
+        id: `welcome-${channelId}-1`,
+        content: `Welcome to #${channelId}! Start the conversation by sending your first message.`,
+        author: { id: 'system', name: 'Slack Clone Bot' },
+        timestamp: new Date(Date.now() - 1000 * 60 * 30),
+        channelId
+      }
+    ]
+  }
 
   // Auth state management
   useEffect(() => {
@@ -26,14 +111,180 @@ function App() {
     return unsubscribe
   }, [])
 
+  // Real-time channel setup
+  useEffect(() => {
+    if (!user?.id) return
+
+    let channel: RealtimeChannel | null = null
+
+    const setupRealtime = async () => {
+      // Clean up previous channel
+      if (channelRef.current) {
+        await channelRef.current.unsubscribe()
+      }
+
+      // Create new channel for current channel
+      channel = blink.realtime.channel(`slack-${currentChannel}`)
+      channelRef.current = channel
+
+      await channel.subscribe({
+        userId: user.id,
+        metadata: {
+          displayName: user.displayName || user.email.split('@')[0],
+          email: user.email,
+          status: 'online'
+        }
+      })
+
+      // Listen for new messages
+      channel.onMessage((message) => {
+        if (message.type === 'chat') {
+          const newMessage: Message = {
+            id: message.id,
+            content: message.data.content,
+            author: {
+              id: message.userId,
+              name: message.metadata?.displayName || 'Unknown User'
+            },
+            timestamp: new Date(message.timestamp),
+            channelId: currentChannel
+          }
+
+          setMessages(prev => ({
+            ...prev,
+            [currentChannel]: [...(prev[currentChannel] || []), newMessage]
+          }))
+        }
+      })
+
+      // Listen for presence changes
+      channel.onPresence((users) => {
+        setOnlineUsers(users.map(u => ({
+          id: u.userId,
+          name: u.metadata?.displayName || 'Anonymous',
+          email: u.metadata?.email,
+          status: u.metadata?.status || 'online'
+        })))
+      })
+
+      // Load recent messages for this channel
+      try {
+        const recentMessages = await channel.getMessages({ limit: 50 })
+        const channelMessages = recentMessages.map(msg => ({
+          id: msg.id,
+          content: msg.data.content,
+          author: {
+            id: msg.userId,
+            name: msg.metadata?.displayName || 'Unknown User'
+          },
+          timestamp: new Date(msg.timestamp),
+          channelId: currentChannel
+        }))
+
+        setMessages(prev => ({
+          ...prev,
+          [currentChannel]: channelMessages
+        }))
+      } catch (error) {
+        console.log('No previous messages found for channel:', currentChannel)
+        
+        // Add welcome message for empty channels
+        setMessages(prev => {
+          if (!prev[currentChannel] || prev[currentChannel].length === 0) {
+            const welcomeMessages = getWelcomeMessages(currentChannel)
+            return {
+              ...prev,
+              [currentChannel]: welcomeMessages
+            }
+          }
+          return prev
+        })
+      }
+    }
+
+    setupRealtime().catch(console.error)
+
+    return () => {
+      channel?.unsubscribe()
+    }
+  }, [user?.id, currentChannel, user?.displayName, user?.email])
+
+  // Welcome messages for empty channels
+  const getWelcomeMessages = (channelId: string): Message[] => {
+    const welcomeMessages: Record<string, Message[]> = {
+      general: [
+        {
+          id: 'welcome-general-1',
+          content: '👋 Welcome to the #general channel! This is where our team comes together for general discussions and updates.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'general'
+        },
+        {
+          id: 'welcome-general-2',
+          content: 'Feel free to introduce yourself, share updates, or start conversations here. Looking forward to collaborating with everyone! 🚀',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 30),
+          channelId: 'general'
+        }
+      ],
+      random: [
+        {
+          id: 'welcome-random-1',
+          content: '🎉 Welcome to #random! This is our space for casual conversations, fun discussions, and everything that doesn\'t fit elsewhere.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 45),
+          channelId: 'random'
+        }
+      ],
+      development: [
+        {
+          id: 'welcome-dev-1',
+          content: '💻 Welcome to #development! Share code snippets, discuss technical challenges, and collaborate on our projects here.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'development'
+        }
+      ],
+      design: [
+        {
+          id: 'welcome-design-1',
+          content: '🎨 Welcome to #design! Share your creative work, get feedback, and discuss design trends and ideas.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'design'
+        }
+      ],
+      announcements: [
+        {
+          id: 'welcome-announcements-1',
+          content: '📢 Welcome to #announcements! Important team updates and company news will be shared here.',
+          author: { id: 'system', name: 'Slack Clone Bot' },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60),
+          channelId: 'announcements'
+        }
+      ]
+    }
+
+    return welcomeMessages[channelId] || [
+      {
+        id: `welcome-${channelId}-1`,
+        content: `Welcome to #${channelId}! Start the conversation by sending your first message.`,
+        author: { id: 'system', name: 'Slack Clone Bot' },
+        timestamp: new Date(Date.now() - 1000 * 60 * 30),
+        channelId
+      }
+    ]
+  }
+
   // Channel data
   const getChannelInfo = (channelId: string) => {
     const channels = {
-      'general': { name: 'general', description: 'General discussion for the team', memberCount: 12 },
-      'random': { name: 'random', description: 'Random conversations and fun stuff', memberCount: 8 },
-      'announcements': { name: 'announcements', description: 'Important team announcements', memberCount: 15 },
-      'development': { name: 'development', description: 'Development discussions', memberCount: 6 },
-      'design': { name: 'design', description: 'Design feedback and collaboration', memberCount: 4 }
+      'general': { name: 'general', description: 'General discussion for the team', memberCount: onlineUsers.length },
+      'random': { name: 'random', description: 'Random conversations and fun stuff', memberCount: onlineUsers.length },
+      'announcements': { name: 'announcements', description: 'Important team announcements', memberCount: onlineUsers.length },
+      'development': { name: 'development', description: 'Development discussions', memberCount: onlineUsers.length },
+      'design': { name: 'design', description: 'Design feedback and collaboration', memberCount: onlineUsers.length }
     }
     
     const directMessages = {
@@ -46,23 +297,23 @@ function App() {
   }
 
   const handleSendMessage = async (content: string) => {
-    if (!user) return
+    if (!user || !channelRef.current) return
 
-    // Optimistic update
-    const newMessage = {
-      id: Date.now().toString(),
-      content,
-      author: {
-        id: user.id,
-        name: user.displayName || user.email.split('@')[0]
-      },
-      timestamp: new Date()
+    try {
+      // Send message through realtime channel
+      await channelRef.current.publish('chat', {
+        content,
+        timestamp: Date.now()
+      }, {
+        userId: user.id,
+        metadata: {
+          displayName: user.displayName || user.email.split('@')[0],
+          email: user.email
+        }
+      })
+    } catch (error) {
+      console.error('Failed to send message:', error)
     }
-    
-    setMessages(prev => [...prev, newMessage])
-
-    // Here you would normally send to the backend
-    // For now, we'll just keep it in local state
   }
 
   if (loading) {
@@ -105,6 +356,8 @@ function App() {
       <Sidebar 
         currentChannel={currentChannel}
         onChannelSelect={setCurrentChannel}
+        onlineUsers={onlineUsers}
+        currentUser={user}
       />
       
       {/* Main Chat Area */}
@@ -116,7 +369,7 @@ function App() {
           isDirectMessage={channelInfo.isDirectMessage}
         />
         
-        <MessageList messages={messages} />
+        <MessageList messages={messages[currentChannel] || []} />
         
         <MessageInput
           channelName={channelInfo.name}

@@ -8,9 +8,10 @@ interface MessageInputProps {
   channelName: string
   onSendMessage: (content: string) => void
   placeholder?: string
+  onTyping?: (isTyping: boolean) => void
 }
 
-export function MessageInput({ channelName, onSendMessage, placeholder }: MessageInputProps) {
+export function MessageInput({ channelName, onSendMessage, placeholder, onTyping }: MessageInputProps) {
   const [message, setMessage] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -133,7 +134,9 @@ export function MessageInput({ channelName, onSendMessage, placeholder }: Messag
             value={message}
             onChange={(e) => {
               setMessage(e.target.value)
-              setIsTyping(e.target.value.length > 0)
+              const typing = e.target.value.length > 0
+              setIsTyping(typing)
+              onTyping?.(typing)
             }}
             onKeyDown={handleKeyDown}
             placeholder={placeholder || `Message #${channelName}`}
